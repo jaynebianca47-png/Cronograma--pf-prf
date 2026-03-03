@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Cronograma PF + PRF | 1 ano</title>
+  <link rel="stylesheet" href="styles.css" />
+  <!-- Chart.js para gráficos (com fallback) -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- jsPDF para relatório PDF -->
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
+</head>
+<body>
+  <header>
+    <h1>📚 Cronograma PF + PRF (1 ano)</h1>
+    <nav>
+      <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
+      <button class="tab-btn" data-tab="semana">Semana</button>
+      <button class="tab-btn" data-tab="calendario">Calendário</button>
+      <button class="tab-btn" data-tab="config">Configurações</button>
+      <span id="notif-status" class="pill small" title="Status de notificações">🔔 Notificações: —</span>
+    </nav>
+  </header>
+
+  <main>
+    <!-- DASHBOARD -->
+    <section id="dashboard" class="tab-panel active">
+      <div class="cards">
+        <div class="card">
+          <h3>Progresso da Semana</h3>
+          <div class="progress-group">
+            <div class="progress-label"><span>Horas feitas</span> <span id="hours-done-label">0h</span></div>
+            <div class="progress"><div id="hours-progress" class="progress-bar"></div></div>
+          </div>
+          <div class="progress-group">
+            <div class="progress-label"><span>Questões (feitas / meta)</span> <span id="q-done-label">0 / 0</span></div>
+            <div class="progress"><div id="q-progress" class="progress-bar alt"></div></div>
+          </div>
+          <div class="row wrap">
+            <button id="btn-replan">🔁 Rodar replanejamento</button>
+            <button id="btn-advance">⏩ Adiantar dia</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Gráfico – Questões por Semana</h3>
+          <canvas id="chart-qs" height="160"></canvas>
+          <small class="muted">Se o gráfico não aparecer, sua internet pode estar bloqueando o CDN. O resto do site funciona normalmente.</small>
+        </div>
+
+        <div class="card">
+          <h3>Distribuição de Tempo por Disciplina (acumulado)</h3>
+          <canvas id="chart-pie" height="160"></canvas>
+        </div>
+
+        <div class="card">
+          <h3>Revisão semanal</h3>
+          <p>Crie sessões de revisão automática, focando as matérias com <strong>menor acerto</strong> e respeitando seus <strong>pesos</strong>.</p>
+          <div class="row wrap">
+            <button id="btn-review-this-week">➕ Adicionar revisão desta semana</button>
+            <button id="btn-review-next-weeks">📅 Aplicar para as próximas 4 semanas</button>
+          </div>
+          <small class="muted">Configurações em <strong>Configurações → Revisão Semanal</strong>.</small>
+        </div>
+
+        <div class="card">
+          <h3>Relatório semanal (PDF)</h3>
+          <p>Gere o PDF com o resumo da semana: horas, questões, acurácia por disciplina e recomendações.</p>
+          <div class="row wrap">
+            <button id="btn-pdf-week">🧾 Gerar PDF desta semana</button>
+            <button id="btn-pdf-prev">🧾 Gerar PDF da semana passada</button>
+          </div>
+          <small class="muted">O PDF inclui gráficos e tabelas. Salve para enviar ao seu mentor/coach.</small>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Atalhos úteis</h3>
+        <div class="row wrap">
+          <a class="pill" id="link-qc" target="_blank" href="https://www.qconcursos.com/questoes-de-concursos">QConcursos</a>
+          <a class="pill" id="link-alfacon" target="_blank" href="https://www.alfaconcursos.com.br/">AlfaCon</a>
+          <button class="pill" id="btn-export">⬇️ Exportar backup</button>
+          <label class="pill file">
+            ⬆️ Importar backup
+            <input id="file-import" type="file" accept="application/json" hidden />
+          </label>
+        </div>
+        <small class="muted">Ao abrir os sites, seu e-mail poderá ser copiado automaticamente para facilitar o login.</small>
+      </div>
+    </section>
+
+    <!-- SEMANA -->
+    <section id="semana" class="tab-panel">
+      <div class="week-header">
+        <button id="prev-week">← Semana anterior</button>
+        <h2 id="week-title">Semana</h2>
+        <button id="next-week">Próxima semana →</button>
+      </div>
+      <div id="week-list" class="week-list"></div>
+    </section>
+
+    <!-- CALENDÁRIO -->
+    <section id="calendario" class="tab-panel">
+      <div class="month-header">
+        <button id="prev-month">←</button>
+        <h2 id="month-title">Mês</h2>
+        <button id="next-month">→</button>
+      </div>
+      <div class="calendar">
+        <div class="calendar-grid" id="calendar-grid"></div>
+      </div>
+    </section>
+
+    <!-- CONFIGURAÇÕES -->
+    <section id="config" class="tab-panel">
+      <div class="grid-2">
+        <div class="card">
+          <h3>Período e Carga Horária</h3>
+          <label>Data de início
+            <input type="date" id="cfg-start" />
+          </label>
+          <label>Duração (meses)
+            <input type="number" id="cfg-duration-months" min="1" max="24" value="12" />
+          </label>
+          <label>Minutos por dia (seg–sex)
+            <input type="number" id="cfg-weekday-min" min="0" step="5" value="90" />
+          </label>
+          <label>Minutos FDS (total)
+            <input type="number" id="cfg-weekend-total" min="0" step="10" value="180" />
+          </label>
+          <label>Dividir FDS igualmente entre sáb e dom?
+            <input type="checkbox" id="cfg-weekend-split" checked />
+          </label>
+          <label>Meta semanal de questões
+            <input type="number" id="cfg-weekly-qs" min="0" step="5" value="100" />
+          </label>
+          <label>Margem extra de tempo p/ replanejamento (minutos/semana)
+            <input type="number" id="cfg-replan-margin" min="0" step="5" value="30" />
+          </label>
+          <label>Concursos focados</label>
+          <div class="row wrap">
+            <label class="chk"><input type="checkbox" id="exam-pf" checked /> PF</label>
+            <label class="chk"><input type="checkbox" id="exam-prf" checked /> PRF</label>
+          </div>
+          <div class="row">
+            <button id="btn-generate">🛠️ Gerar/Atualizar Cronograma</button>
+          </div>
+          <small class="muted">Dados salvos no seu navegador.</small>
+        </div>
+
+        <div class="card">
+          <h3>Disciplinas e Pesos</h3>
+          <p>Pesos definem a proporção do tempo diário. Ajuste conforme seu edital/necessidade.</p>
+          <div id="disc-list" class="disc-list"></div>
+          <div class="row">
+            <input id="disc-name" type="text" placeholder="Nova disciplina (ex.: CTB)" />
+            <select id="disc-exam">
+              <option value="ambos">Ambos</option>
+              <option value="PF">PF</option>
+              <option value="PRF">PRF</option>
+            </select>
+            <input id="disc-weight" type="number" min="0.5" step="0.5" value="1.0" />
+            <button id="disc-add">Adicionar</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Preferências de Replanejamento</h3>
+        <label><input id="cfg-carry-questions" type="checkbox" checked /> Carregar déficit de questões para a próxima semana</label>
+        <label><input id="cfg-raise-daily" type="checkbox" checked /> Aumentar meta diária (limite suave com margem semanal)</label>
+      </div>
+
+      <div class="card">
+        <h3>Alertas de Estudo</h3>
+        <div class="grid-2">
+          <div>
+            <label><input type="checkbox" id="cfg-alerts-enabled" /> Ativar notificações do navegador</label>
+            <label>Horário p/ dias úteis
+              <input type="time" id="cfg-alerts-weekday-time" value="19:00" />
+            </label>
+            <label>Horário p/ fim de semana
+              <input type="time" id="cfg-alerts-weekend-time" value="09:00" />
+            </label>
+            <label>Antecedência (min) p/ alertar antes do horário
+              <input type="number" id="cfg-alerts-lead-min" min="0" step="1" value="10" />
+            </label>
+            <label><input type="checkbox" id="cfg-alerts-sound" checked /> Tocar som junto à notificação</label>
+            <div class="row">
+              <button id="btn-alerts-test">🔔 Testar notificação</button>
+              <button id="btn-alerts-resched">♻️ Reagendar alertas</button>
+            </div>
+          </div>
+          <div>
+            <p class="muted">Para alertas com página fechada, use o botão “+ Google Calendar”.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Revisão Semanal</h3>
+        <div class="grid-2">
+          <div>
+            <label><input type="checkbox" id="cfg-review-enabled" /> Ativar revisão semanal automática</label>
+            <label>% do tempo do dia reservado à revisão
+              <input type="number" id="cfg-review-percent" min="10" max="50" step="5" value="30" />
+            </label>
+            <label>Nº de disciplinas por sessão de revisão
+              <input type="number" id="cfg-review-n" min="1" max="4" step="1" value="2" />
+            </label>
+            <label>Dias de revisão (escolha):</label>
+            <div class="row wrap" id="cfg-review-days">
+              <label class="chk"><input type="checkbox" data-day="1" checked />Seg</label>
+              <label class="chk"><input type="checkbox" data-day="3" checked />Qua</label>
+              <label class="chk"><input type="checkbox" data-day="6" checked />Sáb</label>
+            </div>
+          </div>
+          <div>
+            <p class="muted">A revisão escolhe as <strong>disciplinas com menor acurácia</strong>.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Contas & Atalhos</h3>
+        <div class="grid-2">
+          <div>
+            <label>Email AlfaCon
+              <input type="email" id="cfg-alfacon-email" placeholder="seuemail@exemplo.com" />
+            </label>
+            <label>Email QConcursos
+              <input type="email" id="cfg-qc-email" placeholder="seuemail@exemplo.com" />
+            </label>
+            <label><input type="checkbox" id="cfg-copy-on-open" checked /> Copiar e-mail ao abrir AlfaCon/QConcursos</label>
+          </div>
+          <div>
+            <p class="muted">Por segurança, o site <strong>não salva senhas</strong>. O e-mail será copiado para sua área de transferência para facilitar o login.</p>
+          </div>
+        </div>
+      </div>
+
+      <audio id="alert-sound" preload="auto">
+        <source src="" type="audio/mpeg">
+      </audio>
+    </section>
+  </main>
+
+  <!-- MODAL DO DIA / CALENDÁRIO -->
+  <div id="day-modal" class="modal hidden" aria-hidden="true" role="dialog" aria-labelledby="day-modal-title">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="day-modal-title">Estudos do dia</h3>
+        <button id="day-modal-close" class="close">✖</button>
+      </div>
+      <div id="day-modal-body" class="modal-body"></div>
+      <div class="modal-footer">
+        <div class="row wrap">
+          <button id="day-modal-gcal" class="pill small">+ Google Calendar</button>
+          <span class="muted" id="day-modal-summary">—</span>
+        </div>
+        <div class="row">
+          <button id="day-modal-save">Salvar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <small>Feito para você estudar PF + PRF com constância 💪 — dados salvos localmente.</small>
+  </footer>
+
+  <template id="tpl-day-item">
+    <div class="day">
+      <div class="day-hdr">
+        <div>
+          <strong class="day-title"></strong>
+          <div class="muted day-sub"></div>
+        </div>
+        <div>
+          <label class="chk small"><input type="checkbox" class="chk-advanced" /> adiantado</label>
+          <label class="chk small"><input type="checkbox" class="chk-done" /> concluir</label>
+        </div>
+      </div>
+      <div class="topics"></div>
+      <div class="row wrap">
+        <div class="field">
+          <label>Questões (meta)</label>
+          <input type="number" class="in-q-target" min="0" />
+        </div>
+        <div class="field">
+          <label>Questões (feitas)</label>
+          <input type="number" class="in-q-done" min="0" />
+        </div>
+        <div class="field">
+          <label>Tempo (min feitos)</label>
+          <input type="number" class="in-min-done" min="0" step="5" />
+        </div>
+        <button class="pill small btn-day-reminder" title="Criar lembrete para este dia">🔔 Lembrar…</button>
+        <button class="pill small btn-gcal" title="Adicionar ao Google Calendar">+ Google Calendar</button>
+        <a class="pill small" target="_blank" href="https://www.qconcursos.com/questoes-de-concursos">Abrir QConcursos</a>
+      </div>
+    </div>
+  </template>
+
+  <template id="tpl-topic">
+    <div class="topic">
+      <div class="row space">
+        <strong class="topic-name"></strong>
+        <span class="badge topic-min"></span>
+      </div>
+      <div class="links"></div>
+      <div class="row">
+        <input type="text" class="in-link-title" placeholder="Título do conteúdo (ex.: Aula 12 - AlfaCon)" />
+        <input type="url" class="in-link-url" placeholder="https://..." />
+        <button class="btn-add-link">Anexar link</button>
+      </div>
+    </div>
+  </template>
+
+  <script src="app.js"></script>
+</body>
+</html>
