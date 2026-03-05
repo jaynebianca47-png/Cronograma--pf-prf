@@ -1,0 +1,421 @@
+/* =============================== 
+ Cronograma PF + PRF — App Core (v2.2) 
+ Dados salvos em localStorage 
+ =============================== */ 
+const LS_KEY = "cronograma_pf_prf_v2_2"; // nova versão do storage 
+const $ = (sel, el = document) => el.querySelector(sel); 
+const $$ = (sel, el = document) => [...el.querySelectorAll(sel)]; 
+const state = { 
+ startDate: null, 
+ endDate: null, 
+ weekdayMin: 90, 
+ weekendTotal: 180, 
+ weekendSplit: true, 
+ weeklyQs: 100, 
+ replanMargin: 30, 
+ carryQuestions: true, 
+ raiseDaily: true, 
+ exams: { PF: true, PRF: true }, 
+ disciplines: {}, 
+ planByDate: {}, 
+ historyWeeks: [], 
+ alerts: { enabled:false, weekdayTime:"19:00", weekendTime:"09:00", leadMin:10, sound:true, oneOff:{} }, 
+ review: { enabled:true, percent:30, n:2, days:[1,3,6] }, 
+ account: { alfaconEmail: "jaynebianca47@gmail.com", qcEmail: "jaynebianca47@gmail.com", copyOnOpen: true }, 
+ _timers: [] 
+};
+/* (restante do app.js original continuará abaixo sem alterações) */
+
+<!doctype html> 
+<html lang="pt-BR"> 
+<head> 
+ <meta charset="utf-8" /> 
+ <meta name="viewport" content="width=device-width,initial-scale=1" /> 
+ <title>Cronograma PF + PRF | 1 ano</title> 
+ <link rel="stylesheet" href="styles.css" />
+  <meta name="theme-color" content="#0b132b" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="icon" href="./icons/icon-192.png" sizes="192x192" />
+  <link rel="apple-touch-icon" href="./icons/icon-192.png" /> 
+ <!-- Chart.js para gráficos (com fallback) --> 
+ <script src="./vendor/chart.umd.min.js"></script> 
+ <!-- jsPDF para relatório PDF --> 
+ <script src="./vendor/jspdf.umd.min.js"></script> 
+ <script src="./vendor/jspdf.plugin.autotable.min.js"></script> 
+</head> 
+<body> 
+ <header> 
+ <h1>📚 Cronograma PF + PRF (1 ano)</h1> 
+ <nav> 
+ <button class="tab-btn active" data-tab="dashboard">Dashboard</button> 
+ <button class="tab-btn" data-tab="semana">Semana</button> 
+ <button class="tab-btn" data-tab="calendario">Calendário</button> 
+ <button class="tab-btn" data-tab="config">Configurações</button> 
+ <span id="notif-status" class="pill small" title="Status de notificações">🔔 Notificações: —</span> 
+ </nav> 
+ </header> 
+ <main> 
+ <!-- DASHBOARD --> 
+ <section id="dashboard" class="tab-panel active"> 
+ <div class="cards"> 
+ <div class="card"> 
+ <h3>Progresso da Semana</h3> 
+ <div class="progress-group"> 
+ <div class="progress-label"><span>Horas feitas</span> <span id="hours-done-label">0h</span></div> 
+ <div class="progress"><div id="hours-progress" class="progress-bar"></div></div> 
+ </div> 
+ <div class="progress-group"> 
+ <div class="progress-label"><span>Questões (feitas / meta)</span> <span id="q-done-label">0 / 0</span></div> 
+ <div class="progress"><div id="q-progress" class="progress-bar alt"></div></div> 
+ </div> 
+ </div> 
+ <div class="row wrap"> 
+ <button id="btn-replan">🔁 Rodar replanejamento</button> 
+ <button id="btn-advance">⏩ Adiantar dia</button> 
+ </div> 
+ </div> 
+ <div class="card"> 
+ <h3>Gráfico – Questões por Semana</h3> 
+ <canvas id="chart-qs" height="160"></canvas> 
+ <small class="muted">Se o gráfico não aparecer, sua internet pode estar bloqueando o CDN. O resto do site funciona normalmente.</small> 
+ </div> 
+ <div class="card"> 
+ <h3>Distribuição de Tempo por Disciplina (acumulado)</h3> 
+ <canvas id="chart-pie" height="160"></canvas> 
+ </div> 
+ <div class="card"> 
+ <h3>Revisão semanal</h3> 
+ <p>Crie sessões de revisão automática, focando as matérias com <strong>menor acerto</strong> e respeitando seus <strong>pesos</strong>.</p> 
+ <div class="row wrap"> 
+ <button id="btn-review-this-week">➕ Adicionar revisão desta semana</button> 
+ <button id="btn-review-next-weeks">📅 Aplicar para as próximas 4 semanas</button> 
+ </div> 
+ <small class="muted">Configurações em <strong>Configurações → Revisão Semanal</strong>.</small> 
+ </div> 
+ <div class="card"> 
+ <h3>Relatório semanal (PDF)</h3> 
+ <p>Gere o PDF com o resumo da semana: horas, questões, acurácia por disciplina e recomendações.</p> 
+ <div class="row wrap"> 
+ <button id="btn-pdf-week">🧾 Gerar PDF desta semana</button> 
+ <button id="btn-pdf-prev">🧾 Gerar PDF da semana passada</button> 
+ </div> 
+ <small class="muted">O PDF inclui gráficos e tabelas. Salve para enviar ao seu mentor/coach.</small> 
+ </div> 
+ </div> 
+ <div class="card"> 
+ <h3>Atalhos úteis</h3> 
+ <div class="row wrap"> 
+ <a class="pill" id="link-qc" target="_blank" href="https://www.qconcursos.com/questoes-de-concursos">QConcursos</a> 
+ <a class="pill" id="link-alfacon" target="_blank" href="https://www.alfaconcursos.com.br/">AlfaCon</a> 
+ <button class="pill" id="btn-export">⬇️ Exportar backup</button> 
+ <label class="pill file"> 
+ ⬆️ Importar backup 
+ <input id="file-import" type="file" accept="application/json" hidden /> 
+ </label> 
+ </div> 
+ <small class="muted">Ao abrir os sites, seu e-mail poderá ser copiado automaticamente para facilitar o login.</small> 
+ </div> 
+ </section> 
+ <!-- SEMANA --> 
+ <section id="semana" class="tab-panel"> 
+ <div class="week-header"> 
+ <button id="prev-week">← Semana anterior</button> 
+ <h2 id="week-title">Semana</h2> 
+ <button id="next-week">Próxima semana →</button> 
+ </div> 
+ <div id="week-list" class="week-list"></div> 
+ </section> 
+ <!-- CALENDÁRIO --> 
+ <section id="calendario" class="tab-panel"> 
+ <div class="month-header"> 
+ <button id="prev-month">←</button> 
+ <h2 id="month-title">Mês</h2> 
+ <button id="next-month">→</button> 
+ </div> 
+ <div class="calendar"> 
+ <div class="calendar-grid" id="calendar-grid"></div> 
+ </div> 
+ </section> 
+ <!-- CONFIGURAÇÕES --> 
+ <section id="config" class="tab-panel"> 
+ <div class="grid-2"> 
+ <div class="card"> 
+ <h3>Período e Carga Horária</h3> 
+ <label>Data de início 
+ <input type="date" id="cfg-start" /> 
+ </label> 
+ <label>Duração (meses) 
+ <input type="number" id="cfg-duration-months" min="1" max="24" value="12" /> 
+ </label> 
+ <label>Minutos por dia (seg–sex) 
+ <input type="number" id="cfg-weekday-min" min="0" step="5" value="90" /> 
+ </label> 
+ <label>Minutos FDS (total) 
+ <input type="number" id="cfg-weekend-total" min="0" step="10" value="180" /> 
+ </label> 
+ <label>Dividir FDS igualmente entre sáb e dom? 
+ <input type="checkbox" id="cfg-weekend-split" checked /> 
+ </label> 
+ <label>Meta semanal de questões 
+ <input type="number" id="cfg-weekly-qs" min="0" step="5" value="100" /> 
+ </label> 
+ <label>Margem extra de tempo p/ replanejamento (minutos/semana) 
+ <input type="number" id="cfg-replan-margin" min="0" step="5" value="30" /> 
+ </label> 
+ <label>Concursos focados</label> 
+ <div class="row wrap"> 
+ <label class="chk"><input type="checkbox" id="exam-pf" checked /> PF</label> 
+ <label class="chk"><input type="checkbox" id="exam-prf" checked /> PRF</label> 
+ </div> 
+ <div class="row"> 
+ <button id="btn-generate">🛠️ Gerar/Atualizar Cronograma</button> 
+ </div> 
+ <small class="muted">Dados salvos no seu navegador.</small> 
+ </div> 
+ <div class="card"> 
+ <h3>Disciplinas e Pesos</h3> 
+ <p>Pesos definem a proporção do tempo diário. Ajuste conforme seu edital/necessidade.</p> 
+ <div id="disc-list" class="disc-list"></div> 
+ <div class="row"> 
+ <input id="disc-name" type="text" placeholder="Nova disciplina (ex.: CTB)" /> 
+ <select id="disc-exam"> 
+ <option value="ambos">Ambos</option> 
+ <option value="PF">PF</option> 
+ <option value="PRF">PRF</option> 
+ </select> 
+ <input id="disc-weight" type="number" min="0.5" step="0.5" value="1.0" /> 
+ <button id="disc-add">Adicionar</button> 
+ </div> 
+ </div> 
+ </div> 
+ <div class="card"> 
+ <h3>Preferências de Replanejamento</h3> 
+ <label><input id="cfg-carry-questions" type="checkbox" checked /> Carregar déficit de questões para a próxima semana</label> 
+ <label><input id="cfg-raise-daily" type="checkbox" checked /> Aumentar meta diária (limite suave com margem semanal)</label> 
+ </div> 
+ <div class="card"> 
+ <h3>Alertas de Estudo</h3> 
+ <div class="grid-2"> 
+ <div> 
+ <label><input type="checkbox" id="cfg-alerts-enabled" /> Ativar notificações do navegador</label> 
+ <label>Horário p/ dias úteis 
+ <input type="time" id="cfg-alerts-weekday-time" value="19:00" /> 
+ </label> 
+ <label>Horário p/ fim de semana 
+ <input type="time" id="cfg-alerts-weekend-time" value="09:00" /> 
+ </label> 
+ <label>Antecedência (min) p/ alertar antes do horário 
+ <input type="number" id="cfg-alerts-lead-min" min="0" step="1" value="10" /> 
+ </label> 
+ <label><input type="checkbox" id="cfg-alerts-sound" checked /> Tocar som junto à notificação</label> 
+ <div class="row"> 
+ <button id="btn-alerts-test">🔔 Testar notificação</button> 
+ <button id="btn-alerts-resched">♻️ Reagendar alertas</button> 
+ </div> 
+ </div> 
+ <div> 
+ <p class="muted">Para alertas com página fechada, use o botão “+ Google Calendar”.</p> 
+ </div> 
+ </div> 
+ </div> 
+ <div class="card"> 
+ <h3>Revisão Semanal</h3> 
+ <div class="grid-2"> 
+ <div> 
+ <label><input type="checkbox" id="cfg-review-enabled" /> Ativar revisão semanal automática</label> 
+ <label>% do tempo do dia reservado à revisão 
+ <input type="number" id="cfg-review-percent" min="10" max="50" step="5" value="30" /> 
+ </label> 
+ <label>Nº de disciplinas por sessão de revisão 
+ <input type="number" id="cfg-review-n" min="1" max="4" step="1" value="2" /> 
+ </label> 
+ <label>Dias de revisão (escolha):</label> 
+ <div class="row wrap" id="cfg-review-days"> 
+ <label class="chk"><input type="checkbox" data-day="1" checked />Seg</label> 
+ <label class="chk"><input type="checkbox" data-day="3" checked />Qua</label> 
+ <label class="chk"><input type="checkbox" data-day="6" checked />Sáb</label> 
+ </div> 
+ </div> 
+ <div> 
+ <p class="muted">A revisão escolhe as <strong>disciplinas com menor acurácia</strong>.</p> 
+ </div> 
+ </div> 
+ </div> 
+ <div class="card"> 
+ <h3>Contas & Atalhos</h3> 
+ <div class="grid-2"> 
+ <div> 
+ <label>Email AlfaCon 
+ <input type="email" id="cfg-alfacon-email" placeholder="seuemail@exemplo.com" /> 
+ </label> 
+ <label>Email QConcursos 
+ <input type="email" id="cfg-qc-email" placeholder="seuemail@exemplo.com" /> 
+ </label> 
+ <label><input type="checkbox" id="cfg-copy-on-open" checked /> Copiar e-mail ao abrir AlfaCon/QConcursos</label> 
+ </div> 
+ <div> 
+ <p class="muted">Por segurança, o site <strong>não salva senhas</strong>. O e-mail será copiado para sua área de transferência para facilitar o login.</p> 
+ </div> 
+ </div> 
+ </div> 
+ <audio id="alert-sound" preload="auto"> 
+ <source src="" type="audio/mpeg"> 
+ </audio> 
+ </section> 
+ </main> 
+ <!-- MODAL DO DIA / CALENDÁRIO --> 
+ <div id="day-modal" class="modal hidden" aria-hidden="true" role="dialog" aria-labelledby="day-modal-title"> 
+ <div class="modal-content"> 
+ <div class="modal-header"> 
+ <h3 id="day-modal-title">Estudos do dia</h3> 
+ <button id="day-modal-close" class="close">✖</button> 
+ </div> 
+ <div id="day-modal-body" class="modal-body"></div> 
+ <div class="modal-footer"> 
+ <div class="row wrap"> 
+ <button id="day-modal-gcal" class="pill small">+ Google Calendar</button> 
+ <span class="muted" id="day-modal-summary">—</span> 
+ </div> 
+ <div class="row"> 
+ <button id="day-modal-save">Salvar</button> 
+ </div> 
+ </div> 
+ </div> 
+ </div> 
+ <footer> 
+ <small>Feito para você estudar PF + PRF com constância 💪 — dados salvos localmente.</small> 
+ </footer> 
+ <template id="tpl-day-item"> 
+ <div class="day"> 
+ <div class="day-hdr"> 
+ <div> 
+ <strong class="day-title"></strong> 
+ <div class="muted day-sub"></div> 
+ </div> 
+ <div> 
+ <label class="chk small"><input type="checkbox" class="chk-advanced" /> adiantado</label> 
+ <label class="chk small"><input type="checkbox" class="chk-done" /> concluir</label> 
+ </div> 
+ </div> 
+ <div class="topics"></div> 
+ <div class="row wrap"> 
+ <div class="field"> 
+ <label>Questões (meta)</label> 
+ <input type="number" class="in-q-target" min="0" /> 
+ </div> 
+ <div class="field"> 
+ <label>Questões (feitas)</label> 
+ <input type="number" class="in-q-done" min="0" /> 
+ </div> 
+ <div class="field"> 
+ <label>Tempo (min feitos)</label> 
+ <input type="number" class="in-min-done" min="0" step="5" /> 
+ </div> 
+ <button class="pill small btn-day-reminder" title="Criar lembrete para este dia">🔔 Lembrar…</button> 
+ <button class="pill small btn-gcal" title="Adicionar ao Google Calendar">+ Google Calendar</button> 
+ <a class="pill small" target="_blank" href="https://www.qconcursos.com/questoes-de-concursos">Abrir QConcursos</a> 
+ </div> 
+ </div> 
+ </template> 
+ <template id="tpl-topic"> 
+ <div class="topic"> 
+ <div class="row space"> 
+ <strong class="topic-name"></strong> 
+ <span class="badge topic-min"></span> 
+ </div> 
+ <div class="links"></div> 
+ <div class="row"> 
+ <input type="text" class="in-link-title" placeholder="Título do conteúdo (ex.: Aula 12 - AlfaCon)" /> 
+ <input type="url" class="in-link-url" placeholder="https://..." /> 
+ <button class="btn-add-link">Anexar link</button> 
+ </div> 
+ </div> 
+ </template> 
+ <script src="app.js"></script> 
+  <script src="./sw-register.js" defer></script>
+</body> 
+</html>
+# Cronograma PF + PRF — App instalável (PWA)
+
+Este pacote está pronto para ser **instalado** (PWA) no celular/desktop e abrir offline (shell).
+Para **gráficos** (Chart.js) e **PDF** (jsPDF + AutoTable) funcionarem **offline** no primeiro uso,
+coloque os três arquivos reais em `./vendor/` com estes nomes:
+
+- `chart.umd.min.js`  (Chart.js 4.5.1 UMD)
+- `jspdf.umd.min.js`  (jsPDF 2.5.1 UMD)
+- `jspdf.plugin.autotable.min.js` (AutoTable 3.8.2)
+
+Depois, sirva localmente:
+```bash
+python -m http.server 8000
+# abra http://localhost:8000
+```
+O navegador permitirá **Adicionar à tela inicial**.
+
+:root{--bg:#0f172a;--panel:#111827;--muted:#94a3b8;--text:#e5e7eb;--accent:#22c55e;--accent-2:#38bdf8;--accent-3:#f59e0b;--danger:#ef4444;--radius:12px} 
+*{box-sizing:border-box} 
+html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial} 
+header{padding:16px 20px;background:linear-gradient(180deg,#0b1022,#0f172a);position:sticky;top:0;z-index:10;border-bottom:1px solid #1f2937} 
+h1{margin:0;font-size:20px} 
+nav{margin-top:12px;display:flex;gap:8px;flex-wrap:wrap} 
+.tab-btn{background:#1f2937;color:#d1d5db;border:1px solid #374151;border-radius:999px;padding:8px 12px;cursor:pointer} 
+.tab-btn.active{background:#111827;color:#fff;border-color:#4b5563} 
+#notif-status{margin-left:auto} 
+main{padding:18px} 
+.cards{display:grid;gap:16px;grid-template-columns:repeat(3,minmax(0,1fr))} 
+@media (max-width:1100px){.cards{grid-template-columns:1fr}} 
+.card{background:var(--panel);border:1px solid #1f2937;border-radius:var(--radius);padding:16px} 
+.row{display:flex;gap:10px;align-items:center} 
+.wrap{flex-wrap:wrap} 
+.space{justify-content:space-between} 
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px} 
+@media (max-width:1000px){.grid-2{grid-template-columns:1fr}} 
+label{display:flex;flex-direction:column;gap:6px;margin:8px 0} 
+input,select,button{border-radius:8px;border:1px solid #374151;background:#111827;color:#e5e7eb;padding:8px 10px} 
+input[type="checkbox"]{width:auto;accent-color:#22c55e} 
+button{cursor:pointer} 
+button:hover{border-color:#4b5563} 
+footer{padding:14px 20px;border-top:1px solid #1f2937;color:var(--muted)} 
+.progress{height:10px;background:#0b1320;border-radius:999px;overflow:hidden;border:1px solid #1f2937} 
+.progress-bar{height:100%;width:0;background:linear-gradient(90deg,var(--accent),#16a34a)} 
+.progress-bar.alt{background:linear-gradient(90deg,var(--accent-2),#0284c7)} 
+.progress-group{margin:10px 0} 
+.progress-label{display:flex;justify-content:space-between;color:#c7d2fe} 
+.pill{display:inline-flex;align-items:center;gap:6px;background:#0b1320;border:1px solid #1f2937;padding:6px 10px;border-radius:999px;color:#d1d5db;text-decoration:none} 
+.pill.small{font-size:12px;padding:4px 8px} 
+.pill.file{position:relative;overflow:hidden} 
+.muted{color:var(--muted);font-size:12px} 
+.badge{background:#0b1320;border:1px solid #1f2937;border-radius:999px;padding:2px 8px;font-size:12px;color:#d1d5db} 
+.week-header,.month-header{display:flex;align-items:center;justify-content:center;gap:10px;margin:14px 0} 
+.week-list{display:grid;gap:12px} 
+.day{background:#0b1320;border:1px solid #1f2937;border-radius:12px;padding:12px} 
+.day-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px} 
+.day-sub{margin-top:2px} 
+.topic{background:#0f172a;border:1px solid #1f2937;border-radius:10px;padding:10px;margin:10px 0} 
+.links{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0} 
+.links a{font-size:12px} 
+.chk{display:flex;align-items:center;gap:6px} 
+.chk.small{font-size:12px} 
+.calendar-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px} 
+.cell{border:1px solid #1f2937;border-radius:8px;min-height:100px;padding:8px;background:#0b1320;display:flex;flex-direction:column;gap:6px;cursor:pointer} 
+.cell:hover{outline:1px dashed #334155} 
+.cell .date{font-size:12px;color:#93c5fd} 
+.cell .mini{font-size:12px;color:#cbd5e1} 
+.cell.past{opacity:.7} 
+.cell.today{outline:1px solid #38bdf8} 
+.cell .kpi{display:flex;gap:6px;flex-wrap:wrap} 
+.kpi .chip{font-size:11px;border:1px solid #1f2937;border-radius:999px;padding:2px 6px} 
+.field{display:flex;flex-direction:column;gap:6px;min-width:160px} 
+.row.space .topic-min{color:#86efac} 
+.alert-banner{background:#1e293b;border:1px solid #334155;color:#f8fafc;padding:10px;border-radius:10px;margin:10px 0} 
+.modal{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.5)} 
+.modal.hidden{display:none} 
+.modal-content{background:var(--panel);border:1px solid #1f2937;border-radius:12px;max-width:720px;width:96%;max-height:86vh;overflow:auto;box-shadow:0 10px 40px rgba(0,0,0,.4)} 
+.modal-header{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid #1f2937} 
+.modal-body{padding:12px 14px} 
+.modal-footer{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-top:1px solid #1f2937} 
+.modal .close{background:#0b1320;border:1px solid #374151;border-radius:8px;color:#e5e7eb;padding:6px 10px} 
+.topic-row{display:grid;grid-template-columns:auto 1fr repeat(2,120px);gap:10px;align-items:center;padding:8px;border:1px solid #1f2937;border-radius:10px;background:#0b1320;margin-bottom:8px} 
+.topic-row .nm{font-weight:600} 
+.topic-row .mins{font-size:12px;color:#86efac} 
+.topic-row input[type=number]{width:100%}
